@@ -11,12 +11,16 @@ scikit_diabetes/
 ├── README.md              # 프로젝트 안내
 ├── requirements.txt       # 의존성 목록
 ├── .gitignore
-└── notebooks/
-    ├── diabetes_advanced_practice.ipynb   # 연습용 (TODO 빈칸 포함)
-    └── diabetes_advanced_solution.ipynb   # 답지용 (완성본)
+├── notebooks/
+│   ├── diabetes_advanced_practice.ipynb   # 연습용 (TODO 빈칸 포함)
+│   └── diabetes_advanced_solution.ipynb   # 답지용 (완성본)
+└── dashboard/
+    ├── analysis.py        # 대시보드용 분석 로직 (캐시 가능한 순수 함수)
+    └── app.py             # Streamlit 대시보드 UI
 ```
 
-각 노트북은 셀 단위로 결과를 눈으로 확인하며 전체 분석 파이프라인을 따라가는 형태.
+- `notebooks/` — 셀 단위로 결과를 확인하며 분석을 따라가는 실습용
+- `dashboard/` — EDA·모델링 결과를 한눈에 시각화한 Streamlit 대시보드(결과 발표·공유용)
 
 ## 데이터 개요
 
@@ -64,6 +68,9 @@ pip install -r requirements.txt
 # 2. 주피터로 실습 (셀 단위로 결과 확인)
 jupyter lab notebooks/diabetes_advanced_practice.ipynb   # 연습용
 jupyter lab notebooks/diabetes_advanced_solution.ipynb   # 답지용
+
+# 3. Streamlit 대시보드 실행 (결과 시각화)
+streamlit run dashboard/app.py
 ```
 
 ## 핵심 결론 (미리 보기)
