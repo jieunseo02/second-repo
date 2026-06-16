@@ -11,11 +11,18 @@ scikit_diabetes/
 ├── README.md              # 프로젝트 안내
 ├── requirements.txt       # 의존성 목록
 ├── .gitignore
+├── notebooks/             # EDA+모델링 실습 노트북 (눈으로 보며 진행)
+│   ├── eda_modeling_practice.ipynb   # 연습용 (TODO 빈칸 포함)
+│   └── eda_modeling_solution.ipynb   # 답지용 (완성본)
 ├── practice/
 │   └── app_practice.py    # 연습용 Streamlit 앱 (TODO 빈칸 포함)
 └── solution/
     └── app_solution.py    # 답지용 Streamlit 앱 (완성본)
 ```
+
+> **노트북 vs Streamlit 앱**
+> - `notebooks/` — 셀 단위로 결과를 눈으로 확인하며 EDA·모델링을 따라가는 실습용
+> - `practice/`, `solution/` — 완성된 분석을 인터랙티브 리포트로 보여주는 Streamlit 앱
 
 ## 데이터 개요
 
@@ -58,11 +65,13 @@ scikit_diabetes/
 # 1. 의존성 설치
 pip install -r requirements.txt
 
-# 2. 답지용 실행 (시연용)
-streamlit run solution/app_solution.py
+# 2. 주피터 노트북으로 EDA+모델링 실습 (눈으로 보며 진행)
+jupyter lab notebooks/eda_modeling_practice.ipynb   # 연습용
+jupyter lab notebooks/eda_modeling_solution.ipynb   # 답지용
 
-# 3. 연습용 실행 (실습용)
-streamlit run practice/app_practice.py
+# 3. Streamlit 리포트 앱 실행
+streamlit run solution/app_solution.py   # 답지용(시연)
+streamlit run practice/app_practice.py   # 연습용(실습)
 ```
 
 ## 핵심 결론 (미리 보기)
