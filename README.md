@@ -45,9 +45,9 @@ scikit_diabetes/
 1. **데이터 품질 점검** — 결측·중복 점검, 요약 통계
 2. **심화 EDA** — 왜도·첨도, 타깃 사분위별 바이올린, 상관 클러스터맵, VIF 다중공선성, 상호정보량(비선형), PCA, IsolationForest 이상치 탐지
 3. **피처 엔지니어링** — 시각화 기반 파생변수(상호작용·비선형·비율 항) 생성 및 효과 검증
-4. **모델링** — 7종 모델(ElasticNet·Ridge·Lasso·SVR·KNN·RandomForest·HistGBM)을 RepeatedKFold(5×3)로 비교, 원본 vs 파생 피처 검증
+4. **모델링** — 13종 회귀 모델(LinearRegression·Ridge·Lasso·ElasticNet·SVR·KNN·DecisionTree·RandomForest·ExtraTrees·GradientBoosting·HistGBM·**XGBoost**·**LightGBM**)을 5-fold 교차검증으로 학습하고 **R²·RMSE·MAE 다중 지표**로 비교
 5. **데이터 증강(뻥튀기)** — 가우시안 노이즈·GMM 합성으로 학습 데이터 증강, **학습 폴드 한정·테스트 원본 유지**로 누수 없는 엄격 비교
-6. **하이퍼파라미터 튜닝** — RandomizedSearchCV
+6. **최종 모델 선정·튜닝** — 교차검증 R² 최고 모델 선정 → 트리·부스팅 계열이면 RandomizedSearchCV 튜닝 → 홀드아웃 평가
 7. **모델 해석** — 순열 중요도, 잔차 분석, 부분의존도(PDP), 학습곡선
 
 ## 멘토링 진행 방법

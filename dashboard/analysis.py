@@ -9,16 +9,21 @@ from sklearn.datasets import load_diabetes
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import mutual_info_regression
-from sklearn.ensemble import (RandomForestRegressor, HistGradientBoostingRegressor,
+from sklearn.ensemble import (RandomForestRegressor, ExtraTreesRegressor,
+                              GradientBoostingRegressor, HistGradientBoostingRegressor,
                               IsolationForest)
-from sklearn.linear_model import RidgeCV, LassoCV, ElasticNetCV
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
+from sklearn.tree import DecisionTreeRegressor
 from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import KFold, cross_val_score, train_test_split, learning_curve
+from sklearn.model_selection import (KFold, cross_validate, train_test_split,
+                                     RandomizedSearchCV, learning_curve)
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from sklearn.mixture import GaussianMixture
+from xgboost import XGBRegressor
+from lightgbm import LGBMRegressor
 
 RANDOM_STATE = 42
 
@@ -27,10 +32,6 @@ FEATURE_DESC = {
     "s1": "총 콜레스테롤(TC)", "s2": "LDL", "s3": "HDL", "s4": "TC/HDL 비율",
     "s5": "혈청 중성지방 로그값(ltg)", "s6": "혈당(glu)",
 }
-
-# HistGBM 튜닝 결과 (노트북 RandomizedSearchCV에서 도출)
-BEST_PARAMS = dict(learning_rate=0.05, max_depth=2, max_leaf_nodes=63,
-                   l2_regularization=0.1, min_samples_leaf=10, random_state=RANDOM_STATE)
 
 
 def load_data():
@@ -53,18 +54,53 @@ def add_features(X):
     return d
 
 
-def make_models():
-    """벤치마크 대상 7종 회귀 모델."""
+def _sc(model):
+    """선형·거리 기반 모델은 스케일링 파이프라인으로 감싸기."""
+    return make_pipeline(StandardScaler(), model)
+
+
+def build_models():
+    """비교 대상 13종 회귀 모델 라인업 (선형 ~ 부스팅)."""
     return {
-        "ElasticNet": make_pipeline(StandardScaler(), ElasticNetCV(
-            l1_ratio=[.1, .5, .9, 1], alphas=np.logspace(-3, 1, 30), max_iter=10000)),
-        "Ridge": make_pipeline(StandardScaler(), RidgeCV(alphas=np.logspace(-3, 3, 50))),
-        "Lasso": make_pipeline(StandardScaler(), LassoCV(alphas=np.logspace(-3, 1, 50), max_iter=10000)),
-        "SVR": make_pipeline(StandardScaler(), SVR(C=100, gamma="scale")),
-        "KNN": make_pipeline(StandardScaler(), KNeighborsRegressor(n_neighbors=15)),
+        "LinearRegression": _sc(LinearRegression()),
+        "Ridge": _sc(Ridge(alpha=1.0)),
+        "Lasso": _sc(Lasso(alpha=0.1, max_iter=10000)),
+        "ElasticNet": _sc(ElasticNet(alpha=0.1, l1_ratio=0.5, max_iter=10000)),
+        "SVR": _sc(SVR(C=100, gamma="scale")),
+        "KNN": _sc(KNeighborsRegressor(n_neighbors=15)),
+        "DecisionTree": DecisionTreeRegressor(max_depth=4, random_state=RANDOM_STATE),
         "RandomForest": RandomForestRegressor(n_estimators=400, random_state=RANDOM_STATE),
+        "ExtraTrees": ExtraTreesRegressor(n_estimators=400, random_state=RANDOM_STATE),
+        "GradientBoosting": GradientBoostingRegressor(random_state=RANDOM_STATE),
         "HistGBM": HistGradientBoostingRegressor(random_state=RANDOM_STATE),
+        "XGBoost": XGBRegressor(n_estimators=400, learning_rate=0.05, max_depth=3,
+                                subsample=0.9, random_state=RANDOM_STATE, verbosity=0),
+        "LightGBM": LGBMRegressor(n_estimators=400, learning_rate=0.05,
+                                  random_state=RANDOM_STATE, verbose=-1),
     }
+
+
+# 최종 모델 튜닝용 하이퍼파라미터 분포 (트리·부스팅 계열)
+PARAM_DISTS = {
+    "RandomForest": {"n_estimators": [200, 400, 600], "max_depth": [None, 4, 6, 8],
+                     "max_features": ["sqrt", 0.5, 1.0], "min_samples_leaf": [1, 2, 5]},
+    "ExtraTrees": {"n_estimators": [200, 400, 600], "max_depth": [None, 4, 6, 8],
+                   "max_features": ["sqrt", 0.5, 1.0], "min_samples_leaf": [1, 2, 5]},
+    "GradientBoosting": {"n_estimators": [100, 200, 300], "learning_rate": [0.02, 0.05, 0.1],
+                         "max_depth": [2, 3, 4], "subsample": [0.8, 1.0]},
+    "HistGBM": {"learning_rate": [0.02, 0.05, 0.1, 0.2], "max_depth": [None, 2, 3, 4],
+                "max_leaf_nodes": [15, 31, 63], "l2_regularization": [0.0, 0.1, 1.0],
+                "min_samples_leaf": [10, 20, 30]},
+    "XGBoost": {"n_estimators": [200, 400, 600], "learning_rate": [0.02, 0.05, 0.1],
+                "max_depth": [2, 3, 4], "subsample": [0.8, 1.0],
+                "colsample_bytree": [0.8, 1.0], "reg_lambda": [1, 5, 10]},
+    "LightGBM": {"n_estimators": [200, 400, 600], "learning_rate": [0.02, 0.05, 0.1],
+                 "num_leaves": [15, 31, 63], "max_depth": [-1, 3, 5],
+                 "subsample": [0.8, 1.0], "reg_lambda": [0, 1, 5]},
+}
+
+# 성능 평가 지표 (다중 지표 동시 측정)
+SCORING = {"R2": "r2", "RMSE": "neg_root_mean_squared_error", "MAE": "neg_mean_absolute_error"}
 
 
 def eda_tables():
@@ -104,24 +140,70 @@ def pca_outliers():
     return pdf, float(pca.explained_variance_ratio_.sum())
 
 
-def model_benchmark():
-    """원본 vs 파생 피처 — 7종 모델 5-fold R² 비교."""
+def compare_models():
+    """13종 모델을 다중 지표(R²·RMSE·MAE) 5-fold 교차검증으로 비교."""
     X, y = load_data()
     Xfe = add_features(X)
     cv = KFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
 
-    def bench(Xd):
-        rows = []
-        for name, m in make_models().items():
-            s = cross_val_score(m, Xd, y, cv=cv, scoring="r2")
-            rows.append({"모델": name, "R²": s.mean(), "표준편차": s.std()})
-        return pd.DataFrame(rows)
+    rows = []
+    for name, model in build_models().items():
+        r = cross_validate(model, Xfe, y, cv=cv, scoring=SCORING)
+        rows.append({
+            "모델": name,
+            "R²": r["test_R2"].mean(),
+            "R² 표준편차": r["test_R2"].std(),
+            "RMSE": -r["test_RMSE"].mean(),
+            "MAE": -r["test_MAE"].mean(),
+        })
+    tab = pd.DataFrame(rows).sort_values("R²", ascending=False).reset_index(drop=True)
+    tab.insert(0, "순위", tab.index + 1)
+    return tab
 
-    base = bench(X).rename(columns={"R²": "R²_원본", "표준편차": "std_원본"})
-    fe = bench(Xfe).rename(columns={"R²": "R²_파생", "표준편차": "std_파생"})
-    cmp = base.merge(fe, on="모델")
-    cmp["개선폭"] = cmp["R²_파생"] - cmp["R²_원본"]
-    return cmp.sort_values("R²_파생", ascending=False).reset_index(drop=True)
+
+def final_model(best_name=None):
+    """비교 결과로 최종 모델 선정 → (가능하면) 튜닝 → 홀드아웃 평가·해석."""
+    X, y = load_data()
+    Xfe = add_features(X)
+
+    if best_name is None:
+        best_name = compare_models().iloc[0]["모델"]
+
+    base = build_models()[best_name]
+    tuned = False
+    best_params = {}
+    if best_name in PARAM_DISTS:
+        # 트리·부스팅 계열은 RandomizedSearchCV 로 튜닝
+        search = RandomizedSearchCV(base, PARAM_DISTS[best_name], n_iter=20, cv=5,
+                                    scoring="r2", random_state=RANDOM_STATE, n_jobs=-1).fit(Xfe, y)
+        model = search.best_estimator_
+        best_params = search.best_params_
+        tuned = True
+    else:
+        model = base  # 선형·SVR·KNN 은 정규화/기본값을 그대로 사용
+
+    Xtr, Xte, ytr, yte = train_test_split(Xfe, y, test_size=0.2, random_state=RANDOM_STATE)
+    model.fit(Xtr, ytr)
+    pred = model.predict(Xte)
+
+    pi = permutation_importance(model, Xte, yte, n_repeats=20, random_state=RANDOM_STATE)
+    imp = pd.DataFrame({"변수": Xfe.columns, "중요도": pi.importances_mean}
+                       ).sort_values("중요도", ascending=True)
+
+    resid = pd.DataFrame({"예측값": pred, "잔차": yte.values - pred})
+    pred_actual = pd.DataFrame({"실제값": yte.values, "예측값": pred})
+
+    sizes, tr_sc, te_sc = learning_curve(
+        model, Xfe, y, cv=5, scoring="r2",
+        train_sizes=np.linspace(0.1, 1.0, 8), random_state=RANDOM_STATE)
+    lc = pd.DataFrame({"표본수": sizes, "학습 R²": tr_sc.mean(1), "검증 R²": te_sc.mean(1)})
+
+    return dict(
+        best_name=best_name, tuned=tuned, best_params=best_params,
+        holdout_r2=float(r2_score(yte, pred)),
+        holdout_rmse=float(mean_squared_error(yte, pred) ** 0.5),
+        holdout_mae=float(mean_absolute_error(yte, pred)),
+        importance=imp, residual=resid, pred_actual=pred_actual, learning_curve=lc)
 
 
 def _aug_gaussian(Xtr, ytr, n_new, noise=0.5, seed=0):
@@ -167,30 +249,3 @@ def augmentation_compare():
     }
     return pd.DataFrame([{"증강 방식": k, "R²": v.mean(), "표준편차": v.std()}
                         for k, v in spec.items()])
-
-
-def final_model_results():
-    """튜닝된 HistGBM 최종 학습 — 중요도·잔차·예측·학습곡선 산출."""
-    X, y = load_data()
-    Xfe = add_features(X)
-    Xtr, Xte, ytr, yte = train_test_split(Xfe, y, test_size=0.2, random_state=RANDOM_STATE)
-    best = HistGradientBoostingRegressor(**BEST_PARAMS)
-    best.fit(Xtr, ytr)
-    pred = best.predict(Xte)
-
-    pi = permutation_importance(best, Xte, yte, n_repeats=20, random_state=RANDOM_STATE)
-    imp = pd.DataFrame({"변수": Xfe.columns, "중요도": pi.importances_mean}
-                       ).sort_values("중요도", ascending=True)
-
-    resid = pd.DataFrame({"예측값": pred, "잔차": yte.values - pred})
-    pred_actual = pd.DataFrame({"실제값": yte.values, "예측값": pred})
-
-    sizes, tr_sc, te_sc = learning_curve(
-        best, Xfe, y, cv=5, scoring="r2",
-        train_sizes=np.linspace(0.1, 1.0, 8), random_state=RANDOM_STATE)
-    lc = pd.DataFrame({"표본수": sizes, "학습 R²": tr_sc.mean(1), "검증 R²": te_sc.mean(1)})
-
-    return dict(
-        holdout_r2=float(r2_score(yte, pred)),
-        holdout_rmse=float(mean_squared_error(yte, pred) ** 0.5),
-        importance=imp, residual=resid, pred_actual=pred_actual, learning_curve=lc)

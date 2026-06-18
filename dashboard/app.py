@@ -18,9 +18,9 @@ st.set_page_config(page_title="당뇨병 분석 대시보드", page_icon="🩺",
 load_data = st.cache_data(A.load_data)
 eda_tables = st.cache_data(A.eda_tables)
 pca_outliers = st.cache_data(A.pca_outliers)
-model_benchmark = st.cache_data(A.model_benchmark)
+compare_models = st.cache_data(A.compare_models)
 augmentation_compare = st.cache_data(A.augmentation_compare)
-final_model_results = st.cache_data(A.final_model_results)
+final_model = st.cache_data(A.final_model)
 
 PRIMARY = "#2E5A88"
 
@@ -130,24 +130,42 @@ with tab_corr:
 # 탭 3: 모델링 (성능 비교)
 # ======================================================================
 with tab_model:
-    st.subheader("모델 성능 비교 — 원본 vs 파생 피처")
-    with st.spinner("모델 학습 중... (최초 1회, 이후 캐시)"):
-        cmp = model_benchmark()
+    st.subheader("여러 모델 비교 — 다중 지표(R²·RMSE·MAE)")
+    st.caption("13종 회귀 모델(선형 ~ 부스팅, XGBoost·LightGBM 포함)을 5-fold 교차검증으로 비교")
+    with st.spinner("13종 모델 학습·비교 중... (최초 1회, 이후 캐시)"):
+        cmp = compare_models()
 
-    plot_df = cmp.melt(id_vars="모델", value_vars=["R²_원본", "R²_파생"],
-                       var_name="피처셋", value_name="R²")
-    st.plotly_chart(px.bar(plot_df, x="모델", y="R²", color="피처셋", barmode="group",
-                    title="모델별 5-fold 교차검증 R²"), use_container_width=True)
-
-    best = cmp.iloc[0]
-    c1, c2, c3 = st.columns(3)
-    c1.metric("최고 모델", best["모델"])
-    c2.metric("최고 R² (파생)", f"{best['R²_파생']:.3f}")
-    c3.metric("파생 평균 개선폭", f"{cmp['개선폭'].mean():+.3f}")
-
+    metric = st.radio("정렬·시각화 지표", ["R²", "RMSE", "MAE"], horizontal=True)
+    asc = metric != "R²"  # R²는 클수록, RMSE/MAE는 작을수록 좋음
+    cmp_sorted = cmp.sort_values(metric, ascending=asc)
+    err = "R² 표준편차" if metric == "R²" else None
+    st.plotly_chart(px.bar(cmp_sorted, x="모델", y=metric, error_y=err, color=metric,
+                    color_continuous_scale="Tealgrn" if metric == "R²" else "OrRd_r",
+                    title=f"모델별 {metric} (5-fold)"), use_container_width=True)
     st.dataframe(cmp.round(4), use_container_width=True, hide_index=True)
-    st.info("트리 앙상블이 항상 우월하지는 않으며, 정규화 선형 모델이 이 데이터에서 경쟁력 있음. "
-            "파생변수는 모델에 따라 소폭의 개선에 기여.")
+
+    st.divider()
+    st.subheader("최종 모델 선정")
+    st.caption("선정 기준: 교차검증 R² 최고 모델 → (트리·부스팅 계열이면) RandomizedSearchCV 튜닝 → 홀드아웃 평가")
+    with st.spinner("최종 모델 선정·튜닝·평가 중..."):
+        fm = final_model()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("선정 모델", fm["best_name"])
+    m2.metric("홀드아웃 R²", f"{fm['holdout_r2']:.3f}")
+    m3.metric("홀드아웃 RMSE", f"{fm['holdout_rmse']:.1f}")
+    m4.metric("홀드아웃 MAE", f"{fm['holdout_mae']:.1f}")
+    if fm["tuned"]:
+        st.success(f"튜닝 적용됨 — 최적 파라미터: {fm['best_params']}")
+    else:
+        st.info("선정 모델이 선형 계열이라 별도 튜닝 없이 정규화 기본값 사용. "
+                "이 데이터는 대체로 선형적이라 복잡한 부스팅보다 정규화 선형 모델이 우수.")
+    pa = fm["pred_actual"]
+    fig = px.scatter(pa, x="실제값", y="예측값", opacity=0.6,
+                     title=f"예측 대 실제 — {fm['best_name']}")
+    lim = [pa["실제값"].min(), pa["실제값"].max()]
+    fig.add_shape(type="line", x0=lim[0], y0=lim[0], x1=lim[1], y1=lim[1],
+                  line=dict(color="red", dash="dash"))
+    st.plotly_chart(fig, use_container_width=True)
 
 # ======================================================================
 # 탭 4: 증강·해석
@@ -164,12 +182,13 @@ with tab_adv:
                "누수 없는 비교에서는 뚜렷한 개선이 나타나지 않음.")
 
     st.divider()
-    st.subheader("최종 모델 해석 (튜닝된 HistGBM)")
-    with st.spinner("최종 모델 학습·해석 중..."):
-        fr = final_model_results()
-    c1, c2 = st.columns(2)
+    with st.spinner("최종 모델 해석 중..."):
+        fr = final_model()
+    st.subheader(f"최종 모델 해석 — {fr['best_name']}")
+    c1, c2, c3a = st.columns(3)
     c1.metric("홀드아웃 R²", f"{fr['holdout_r2']:.3f}")
     c2.metric("홀드아웃 RMSE", f"{fr['holdout_rmse']:.1f}")
+    c3a.metric("홀드아웃 MAE", f"{fr['holdout_mae']:.1f}")
 
     c3, c4 = st.columns(2)
     with c3:
@@ -177,26 +196,18 @@ with tab_adv:
                         title="순열 중요도", color="중요도",
                         color_continuous_scale="Teal"), use_container_width=True)
     with c4:
-        pa = fr["pred_actual"]
-        fig = px.scatter(pa, x="실제값", y="예측값", opacity=0.6, title="예측 대 실제")
-        lim = [pa["실제값"].min(), pa["실제값"].max()]
-        fig.add_shape(type="line", x0=lim[0], y0=lim[0], x1=lim[1], y1=lim[1],
-                      line=dict(color="red", dash="dash"))
-        st.plotly_chart(fig, use_container_width=True)
-
-    c5, c6 = st.columns(2)
-    with c5:
         rs = fr["residual"]
         fig = px.scatter(rs, x="예측값", y="잔차", opacity=0.6, title="잔차 분석")
         fig.add_hline(y=0, line_dash="dash", line_color="red")
         st.plotly_chart(fig, use_container_width=True)
-    with c6:
-        lc = fr["learning_curve"]
-        fig = go.Figure()
-        fig.add_scatter(x=lc["표본수"], y=lc["학습 R²"], name="학습 R²", mode="lines+markers")
-        fig.add_scatter(x=lc["표본수"], y=lc["검증 R²"], name="검증 R²", mode="lines+markers")
-        fig.update_layout(title="학습곡선", xaxis_title="학습 표본 수", yaxis_title="R²")
-        st.plotly_chart(fig, use_container_width=True)
+
+    lc = fr["learning_curve"]
+    fig = go.Figure()
+    fig.add_scatter(x=lc["표본수"], y=lc["학습 R²"], name="학습 R²", mode="lines+markers")
+    fig.add_scatter(x=lc["표본수"], y=lc["검증 R²"], name="검증 R²", mode="lines+markers")
+    fig.update_layout(title="학습곡선", xaxis_title="학습 표본 수", yaxis_title="R²")
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("검증 곡선이 평탄 → 표본 수보다 피처 정보량이 성능의 병목")
     st.caption("검증 곡선이 평탄 → 표본 수보다 피처 정보량이 성능의 병목")
 
 st.divider()
