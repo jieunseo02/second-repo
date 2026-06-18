@@ -1,7 +1,6 @@
 """
 당뇨병 데이터 분석 대시보드 (Streamlit)
 노트북 분석과 별개로, EDA·모델링 결과를 시각화해 한눈에 보여주는 대시보드.
-모든 설명 문장은 명사형 어미로 작성.
 
 실행: streamlit run dashboard/app.py
 """
